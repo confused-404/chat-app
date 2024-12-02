@@ -1,5 +1,6 @@
 #include <iostream>
 #include <WS2tcpip.h>
+#include <string>
 
 int main()
 {
@@ -41,74 +42,71 @@ int main()
         return 1;
     }
 
-    std::cout << "Server listening on port 54000..." << std::endl;
-
-    sockaddr_in client;
-    int clientSize = sizeof(client);
-
-    SOCKET clientSocket = accept(serverSocket, (sockaddr *)&client, &clientSize);
-    if (clientSocket == INVALID_SOCKET)
-    {
-        std::cerr << "Accept failed, Err #" << WSAGetLastError() << std::endl;
-        closesocket(serverSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Client connected!" << std::endl;
-
-    char host[NI_MAXHOST];
-    char service[NI_MAXSERV];
-
-    ZeroMemory(host, NI_MAXHOST);
-    ZeroMemory(service, NI_MAXSERV);
-
-    if (getnameinfo((sockaddr *)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
-    {
-        std::cout << host << " connected on port " << service << std::endl;
-    }
-    else
-    {
-        inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-        std::cout << host << " connected on port " << ntohs(client.sin_port) << std::endl;
-    }
-
-    closesocket(serverSocket);
-
-    char buff[4096];
+    fd_set master;
+    FD_ZERO(&master);
+    FD_SET(serverSocket, &master);
 
     while (true)
     {
-        ZeroMemory(buff, 4096);
+        fd_set copy = master;
 
-        int bytesReceived = recv(clientSocket, buff, 4096, 0);
-        if (bytesReceived == SOCKET_ERROR)
-        {
-            std::cerr << "Error receiving data: " << WSAGetLastError() << std::endl;
-            break;
-        }
+        int socketCount = select(0, &copy, nullptr, nullptr, nullptr);
 
-        if (bytesReceived == 0)
+        for (int i = 0; i < socketCount; i++)
         {
-            std::cout << "Client disconnected" << std::endl;
-            break;
-        }
-        buff[bytesReceived] = '\0';
-
-        for (int i = 0; i < bytesReceived; i++)
-        {
-            if (buff[i] == '\r')
+            SOCKET socket = copy.fd_array[i];
+            if (socket == serverSocket)
             {
-                buff[i] = '\n';
+                sockaddr_in client;
+                int clientSize = sizeof(client);
+
+                SOCKET clientSocket = accept(serverSocket, (sockaddr *)&client, &clientSize);
+
+                char host[NI_MAXHOST];
+                char service[NI_MAXSERV];
+
+                ZeroMemory(host, NI_MAXHOST);
+                ZeroMemory(service, NI_MAXSERV);
+
+                std::string port;
+
+                if (getnameinfo((sockaddr *)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
+                {
+                    port = service;
+                }
+                else
+                {
+                    inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
+                    port = ntohs(client.sin_port);
+                }
+
+                FD_SET(clientSocket, &master);
+                
+                std::string welcomeMessage = "Welcome, User " + std::to_string(master.fd_count-1) + "\n";
+
+                send(clientSocket, welcomeMessage.c_str(), welcomeMessage.size()+1, 0);
+            }
+            else
+            {
+                char buff[4096];
+                ZeroMemory(buff, 4096);
+
+                int bytesReceived = recv(socket, buff, 4096, 0);
+                if (bytesReceived <= 0) {
+                    closesocket(socket);
+                    FD_CLR(socket, &master);
+                } else {
+                    for (int i = 0; i < master.fd_count; i++) {
+                        SOCKET receiver = master.fd_array[i];
+                        if (receiver != serverSocket && receiver != socket) {
+                            send(receiver, buff, bytesReceived, 0);
+                        }
+                    }
+                }
             }
         }
-
-        std::cout << "Received: " << buff << std::endl;
-
-        send(clientSocket, buff, bytesReceived, 0);
     }
 
-    closesocket(clientSocket);
     WSACleanup();
     return 0;
 }
