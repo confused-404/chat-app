@@ -1,8 +1,21 @@
 #include <iostream>
 #include <WS2tcpip.h>
 #include <string>
+#include <map>
 
-int main()
+enum class ClientState
+{
+    WAITING_FOR_USERNAME,
+    CHATTING
+};
+struct ClientInfo
+{
+    SOCKET clientSocket;
+    std::string username;
+    ClientState state;
+};
+
+int initializeWinsock()
 {
     WSAData wsData;
     WORD ver = MAKEWORD(2, 2);
@@ -13,14 +26,22 @@ int main()
         std::cerr << "Can't initialize WinSock" << std::endl;
         return 1;
     }
+    return 0;
+}
 
+SOCKET createServerSocket()
+{
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (serverSocket == INVALID_SOCKET)
     {
         std::cerr << "Can't create server socket" << std::endl;
-        return 1;
+        return INVALID_SOCKET;
     }
+    return serverSocket;
+}
 
+int bindServerSocket(SOCKET serverSocket)
+{
     sockaddr_in server_hint;
     server_hint.sin_family = AF_INET;
     server_hint.sin_port = htons(54000);
@@ -33,7 +54,11 @@ int main()
         WSACleanup();
         return 1;
     }
+    return 0;
+}
 
+int startListening(SOCKET serverSocket)
+{
     if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR)
     {
         std::cerr << "Listen failed, Err #" << WSAGetLastError() << std::endl;
@@ -41,10 +66,20 @@ int main()
         WSACleanup();
         return 1;
     }
+    return 0;
+}
+
+int main()
+{
+    initializeWinsock();
+    SOCKET serverSocket = createServerSocket();
+    bindServerSocket(serverSocket);
+    startListening(serverSocket);
 
     fd_set master;
     FD_ZERO(&master);
     FD_SET(serverSocket, &master);
+    std::map<SOCKET, ClientInfo *> clients;
 
     while (true)
     {
@@ -81,25 +116,55 @@ int main()
                 }
 
                 FD_SET(clientSocket, &master);
-                
-                std::string welcomeMessage = "Welcome, User " + std::to_string(master.fd_count-1) + "\n";
 
-                send(clientSocket, welcomeMessage.c_str(), welcomeMessage.size()+1, 0);
+                std::string usernameMessage = "Enter your username: ";
+
+                send(clientSocket, usernameMessage.c_str(), sizeof(usernameMessage) + 1, 0);
+
+                ClientInfo *cinfo = new ClientInfo;
+                cinfo->clientSocket = clientSocket;
+                cinfo->username = "";
+                cinfo->state = ClientState::WAITING_FOR_USERNAME;
+                clients[clientSocket] = cinfo;
             }
             else
             {
+                auto it = clients.find(socket);
+
+                if (it == clients.end())
+                {
+                    std::cerr << "Foreign socket sending data" << std::endl;
+                }
+
+                ClientInfo *cinfo = it->second;
+
                 char buff[4096];
                 ZeroMemory(buff, 4096);
 
                 int bytesReceived = recv(socket, buff, 4096, 0);
-                if (bytesReceived <= 0) {
+                if (bytesReceived <= 0)
+                {
                     closesocket(socket);
                     FD_CLR(socket, &master);
-                } else {
-                    for (int i = 0; i < master.fd_count; i++) {
-                        SOCKET receiver = master.fd_array[i];
-                        if (receiver != serverSocket && receiver != socket) {
-                            send(receiver, buff, bytesReceived, 0);
+                }
+                else
+                {
+                    if (cinfo->state == ClientState::WAITING_FOR_USERNAME)
+                    {
+                        cinfo->username = buff;
+                        cinfo->state = ClientState::CHATTING;
+                        std::string welcomeMessage = "Welcome, " + cinfo->username;
+                        send(cinfo->clientSocket, welcomeMessage.c_str(), sizeof(welcomeMessage) + 1, 0);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < master.fd_count; i++)
+                        {
+                            SOCKET receiver = master.fd_array[i];
+                            if (receiver != serverSocket && receiver != socket)
+                            {
+                                send(receiver, buff, bytesReceived, 0);
+                            }
                         }
                     }
                 }
