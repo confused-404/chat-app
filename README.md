@@ -6,6 +6,6 @@ To compile, using g++:
 
 Then run the resulting bin/main.exe file to host the server
 
-To test:
+To run a tester client:
 
 ```$ python src/tester.py```
