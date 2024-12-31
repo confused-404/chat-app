@@ -40,11 +40,16 @@ void ClientManager::processClientMessage(SOCKET clientSocket, const std::string 
     ClientInfo *cinfo = it->second.get();
     cinfo->buffer.append(message);
 
-    size_t newlinePos;
-    while ((newlinePos = cinfo->buffer.find('\n')) != std::string::npos)
+    while (cinfo->buffer.size() >= sizeof(uint32_t))
     {
-        std::string line = cinfo->buffer.substr(0, newlinePos);
-        cinfo->buffer.erase(0, newlinePos + 1);
+        uint32_t msgLength = ntohl(*reinterpret_cast<const uint32_t*>(cinfo->buffer.data()));
+        if (cinfo->buffer.size() < sizeof(uint32_t) + msgLength)
+        {
+            break;
+        }
+
+        std::string line = cinfo->buffer.substr(sizeof(uint32_t), msgLength);
+        cinfo->buffer.erase(0, sizeof(uint32_t) + msgLength);
 
         if (cinfo->state == ClientState::WAITING_FOR_USERNAME)
         {
@@ -75,4 +80,17 @@ void ClientManager::processClientMessage(SOCKET clientSocket, const std::string 
             }
         }
     }
+}
+
+std::string ClientManager::getUsername(SOCKET clientSocket) {
+    auto it = clients.find(clientSocket);
+    if (it == clients.end())
+    {
+        std::cerr << "Unknown client socket" << std::endl;
+        return "";
+    }
+
+    ClientInfo *cinfo = it->second.get();
+    // std::cout << "getusername call, username: " << cinfo->username << std::endl;
+    return cinfo->username;
 }

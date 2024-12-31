@@ -69,8 +69,10 @@ int main()
                 }
                 else
                 {
-                    std::cout << "Received message: " << std::string(buff, bytesReceived) << std::endl;
-                    clientManager.processClientMessage(socket, std::string(buff, bytesReceived));
+                    std::string message(buff, bytesReceived);
+                    std::string username = clientManager.getUsername(socket);
+                    std::cout << username << ": " << message << std::endl;
+                    clientManager.processClientMessage(socket, message);
                 }
             }
         }
