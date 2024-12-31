@@ -13,6 +13,7 @@ struct ClientInfo
     SOCKET clientSocket;
     std::string username;
     ClientState state;
+    std::string buffer;
 };
 
 int initializeWinsock()
@@ -149,31 +150,37 @@ int main()
                 }
                 else
                 {
-                    buff[bytesReceived] = '\0';
-                    if (cinfo->state == ClientState::WAITING_FOR_USERNAME)
+                    cinfo->buffer.append(buff, bytesReceived);
+
+                    size_t newlinePos;
+                    while ((newlinePos = cinfo->buffer.find('\n')) != std::string::npos)
                     {
-                        cinfo->username = std::string(buff).substr(0, bytesReceived);
-                        cinfo->state = ClientState::CHATTING;
-                        std::string welcomeMessage = "Welcome, " + cinfo->username + "\n";
-                        send(cinfo->clientSocket, welcomeMessage.c_str(), welcomeMessage.length(), 0);
+                        std::string line = cinfo->buffer.substr(0, newlinePos);
+                        cinfo->buffer.erase(0, newlinePos + 1);
 
-                        std::cout << "Sent to " << cinfo->username << ": " << welcomeMessage;
-                    }
-                    else
-                    {
-                        std::string rawmsg = std::string(buff).substr(0, bytesReceived);
-                        if (rawmsg.find_first_not_of(" \t\n\v\f\r") == std::string::npos)
-                            continue;
-                        std::string fullmsg = cinfo->username + ": " + rawmsg + "\n";
-
-                        std::cout << "Received from " << cinfo->username << ": " << rawmsg << std::endl;
-
-                        for (int i = 0; i < master.fd_count; i++)
+                        if (cinfo->state == ClientState::WAITING_FOR_USERNAME)
                         {
-                            SOCKET receiver = master.fd_array[i];
-                            if (receiver != serverSocket && receiver != socket)
+                            cinfo->username = line;
+                            cinfo->state = ClientState::CHATTING;
+                            std::string welcomeMessage = "Welcome, " + cinfo->username + "\n";
+                            send(cinfo->clientSocket, welcomeMessage.c_str(), welcomeMessage.length(), 0);
+
+                            std::cout << "Sent to " << cinfo->username << ": " << welcomeMessage;
+                        }
+                        else
+                        {
+                            std::string fullmsg = cinfo->username + ": " + line + "\n";
+
+                            std::cout << "Received from " << cinfo->username << ": " << line << std::endl;
+                            std::cout << cinfo->username << std::endl;
+
+                            for (int i = 0; i < master.fd_count; i++)
                             {
-                                send(receiver, fullmsg.c_str(), fullmsg.length(), 0);
+                                SOCKET receiver = master.fd_array[i];
+                                if (receiver != serverSocket && receiver != socket)
+                                {
+                                    send(receiver, fullmsg.c_str(), fullmsg.length(), 0);
+                                }
                             }
                         }
                     }
